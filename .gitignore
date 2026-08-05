@@ -1,0 +1,20 @@
+# Nim derleme çıktıları
+nimcache/
+*.exe
+*.o
+*.a
+*.so
+*.dll
+
+# Nimble
+.nimble/
+nimble.lock
+
+# Test binary'leri
+tests/test_*
+!tests/test_*.nim
+
+# Geçici dosyalar
+*.tmp
+*.swp
+.DS_Store
