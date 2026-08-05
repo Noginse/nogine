@@ -18,3 +18,12 @@ tests/test_*
 *.tmp
 *.swp
 .DS_Store
+
+# Derlenmiş binary dosyalar (uzantısız)
+src/nogine/dogrulama
+src/nogine/tipler
+src/nogine/yanit
+src/nogine/yardimcilar
+
+# HTML dokümantasyon çıktısı
+src/nogine/htmldocs/
