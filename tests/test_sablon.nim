@@ -2,79 +2,85 @@
 # Created by noginse
 # https://github.com/noginse/nogine
 
-## Şablon motoru testleri
-
-import std/[unittest, json, tables, strutils]
+import unittest
+import std/tables
 import ../src/nogine/sablon
 
-suite "Şablon Motoru Testleri":
-
-  test "Değişken yerleştirme":
-    var baglam = initTable[string, string]()
-    baglam["isim"] = "Dünya"
-    let sonuc = renderMetin("Merhaba {{isim}}!", baglam)
+suite "Sablon - Değişken Yerleştirme":
+  test "Basit değişken":
+    var baglam = yeniBaglam()
+    baglamEkle(baglam, "isim", "Dünya")
+    let sonuc = isle("Merhaba {{ isim }}!", baglam)
     check sonuc == "Merhaba Dünya!"
 
-  test "Boşluklu değişken":
-    var baglam = initTable[string, string]()
-    baglam["deger"] = "42"
-    let sonuc = renderMetin("Sayı: {{ deger }}", baglam)
+  test "Sayı değişkeni":
+    var baglam = yeniBaglam()
+    baglamEkle(baglam, "deger", 42)
+    let sonuc = isle("Sayı: {{ deger }}", baglam)
     check sonuc == "Sayı: 42"
 
-  test "Boolean değişken":
-    var baglam = initTable[string, string]()
-    baglam["aktif"] = %true
-    let sonuc = renderMetin("Durum: {{aktif}}", baglam)
-    check sonuc == "Durum: doğru"
+  test "Bool değişkeni":
+    var baglam = yeniBaglam()
+    baglamEkle(baglam, "aktif", true)
+    let sonuc = isle("Durum: {{ aktif }}", baglam)
+    check sonuc == "Durum: true"
 
-  test "Yorum bloğu kaldırma":
-    var baglam = initTable[string, string]()
-    let sonuc = renderMetin("Merhaba {# Bu bir yorum #}Dünya", baglam)
+  test "Yorum bloğu":
+    var baglam = yeniBaglam()
+    let sonuc = isle("Merhaba {# Bu bir yorum #}Dünya", baglam)
     check sonuc == "Merhaba Dünya"
 
-  test "If koşulu - doğru":
-    var baglam = initTable[string, string]()
-    baglam["admin"] = %true
-    let sablon = "{% if admin %}Yönetici{% endif %}"
-    let sonuc = renderMetin(sablon, baglam)
+suite "Sablon - Koşul Blokları":
+  test "if - doğru koşul":
+    var baglam = yeniBaglam()
+    baglamEkle(baglam, "admin", "true")
+    let sonuc = isle("{% if admin %}Yönetici{% endif %}", baglam)
     check sonuc == "Yönetici"
 
-  test "If koşulu - yanlış":
-    var baglam = initTable[string, string]()
-    baglam["admin"] = %false
-    let sablon = "{% if admin %}Yönetici{% endif %}"
-    let sonuc = renderMetin(sablon, baglam)
+  test "if - yanlış koşul":
+    var baglam = yeniBaglam()
+    baglamEkle(baglam, "admin", "false")
+    let sonuc = isle("{% if admin %}Yönetici{% endif %}", baglam)
     check sonuc == ""
 
-  test "If/else koşulu":
-    var baglam = initTable[string, string]()
-    baglam["girisYapti"] = %false
-    let sablon = "{% if girisYapti %}Hoş geldin{% else %}Giriş yap{% endif %}"
-    let sonuc = renderMetin(sablon, baglam)
+  test "if/else":
+    var baglam = yeniBaglam()
+    baglamEkle(baglam, "girisYapti", "false")
+    let sonuc = isle("{% if girisYapti %}Hoş geldin{% else %}Giriş yap{% endif %}", baglam)
     check sonuc == "Giriş yap"
 
-  test "For döngüsü":
-    var baglam = initTable[string, string]()
-    baglam["renkler"] = %[%"kırmızı", %"mavi", %"yeşil"]
-    let sablon = "{% for renk in renkler %}{{renk}} {% endfor %}"
-    let sonuc = renderMetin(sablon, baglam)
-    check sonuc.contains("kırmızı")
-    check sonuc.contains("mavi")
-    check sonuc.contains("yeşil")
+suite "Sablon - For Döngüsü":
+  test "Basit for döngüsü":
+    var baglam = yeniBaglam()
+    baglamEkle(baglam, "renkler", "kırmızı,mavi,yeşil")
+    let sonuc = isle("{% for renk in renkler %}{{ renk }} {% endfor %}", baglam)
+    check "kırmızı" in sonuc
+    check "mavi" in sonuc
+    check "yeşil" in sonuc
 
-  test "Döngü indeksi":
-    var baglam = initTable[string, string]()
-    baglam["ogeler"] = %[%"a", %"b"]
-    let sablon = "{% for oge in ogeler %}{{dongu_sayac}}.{{oge}} {% endfor %}"
-    let sonuc = renderMetin(sablon, baglam)
-    check sonuc.contains("1.a")
-    check sonuc.contains("2.b")
+  test "Döngü sayacı":
+    var baglam = yeniBaglam()
+    baglamEkle(baglam, "ogeler", "a,b")
+    let sonuc = isle("{% for oge in ogeler %}{{ loop_count }}.{{ oge }} {% endfor %}", baglam)
+    check "1.a" in sonuc
+    check "2.b" in sonuc
 
-  test "Boş değişken değiştirilmez":
-    var baglam = initTable[string, string]()
-    let sonuc = renderMetin("{{eksikDegisken}}", baglam)
-    check sonuc == "{{eksikDegisken}}"
+suite "Sablon - Filtreler":
+  test "Büyük harf filtresi":
+    var baglam = yeniBaglam()
+    baglamEkle(baglam, "isim", "merhaba")
+    let sonuc = isle("{{ isim | buyuk }}", baglam)
+    check sonuc == "MERHABA"
 
-when isMainModule:
-  echo ""
-  echo "Şablon testleri tamamlandı."
+  test "Küçük harf filtresi":
+    var baglam = yeniBaglam()
+    baglamEkle(baglam, "isim", "MERHABA")
+    let sonuc = isle("{{ isim | kucuk }}", baglam)
+    check sonuc == "merhaba"
+
+  test "Eksik değişken boş döner":
+    var baglam = yeniBaglam()
+    let sonuc = isle("{{eksikDegisken}}", baglam)
+    check sonuc == ""
+
+echo "\nSablon testleri tamamlandı."
