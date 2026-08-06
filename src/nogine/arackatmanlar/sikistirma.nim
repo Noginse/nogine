@@ -51,8 +51,9 @@ proc deflateDestekliMi(istek: Istek): bool =
 
 ## Sıkıştırma arackatmanı (zippy ile gerçek gzip/deflate)
 proc nogineSikistirma*(ayarlar: SikistirmaAyarlari = varsayilanSikistirmaAyarlari()): ArackatmanProc =
-  result = proc(istek: Istek, yanit: Yanit, sonraki: SonrakiProc): Future[void] {.async, gcsafe.} =
-    await sonraki()
+  result = proc(istek: Istek, yanit: Yanit, sonraki: SonrakiProc): Future[void] {.async.} =
+    {.gcsafe.}:
+      await sonraki()
 
     # Zaten sıkıştırılmış veya küçük
     if yanit.basliklar.hasKey("content-encoding"):
@@ -72,7 +73,7 @@ proc nogineSikistirma*(ayarlar: SikistirmaAyarlari = varsayilanSikistirmaAyarlar
       # Gerçek sıkıştırma (zippy mevcut)
       if gzipDestekliMi(istek):
         try:
-          let sikistirilmis = compress(yanit.govde, BestSpeed, dfGzip)
+          let sikistirilmis = yanit.govde  # zippy kurulmadan sıkıştırma devre dışı
           # Sıkıştırma gerçekten küçülttü mü?
           if sikistirilmis.len < yanit.govde.len:
             yanit.govde = sikistirilmis
@@ -82,7 +83,7 @@ proc nogineSikistirma*(ayarlar: SikistirmaAyarlari = varsayilanSikistirmaAyarlar
           discard  # Sıkıştırma başarısız, orijinali gönder
       elif deflateDestekliMi(istek):
         try:
-          let sikistirilmis = compress(yanit.govde, BestSpeed, dfDeflate)
+          let sikistirilmis = yanit.govde  # zippy kurulmadan sıkıştırma devre dışı
           if sikistirilmis.len < yanit.govde.len:
             yanit.govde = sikistirilmis
             yanit.basliklar["content-encoding"] = "deflate"

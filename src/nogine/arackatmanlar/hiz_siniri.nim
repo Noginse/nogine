@@ -29,7 +29,7 @@ proc varsayilanHizAyarlari*(): HizSiniriAyarlari =
   )
 
 proc nogineHizSiniri*(ayarlar: HizSiniriAyarlari): ArackatmanProc =
-  result = proc(istek: Istek, yanit: Yanit, sonraki: SonrakiProc): Future[void] {.async, gcsafe.} =
+  result = proc(istek: Istek, yanit: Yanit, sonraki: SonrakiProc): Future[void] {.async.} =
     let ip = istek.istemciIp
     let simdi = getTime()
 
@@ -61,7 +61,8 @@ proc nogineHizSiniri*(ayarlar: HizSiniriAyarlari): ArackatmanProc =
         await yanit.gonder()
         return
 
-    await sonraki()
+    {.gcsafe.}:
+      await sonraki()
 
 proc nogineHizSiniri*(saniyede: int): ArackatmanProc =
   var ayarlar = varsayilanHizAyarlari()

@@ -2,250 +2,287 @@
 # Created by noginse
 # https://github.com/noginse/nogine
 
-## Nogine şablon (template) motoru.
-## Değişken yerleştirme, koşullar, döngüler ve kalıtım desteği.
+## Nogine sablon (template) motoru.
+## Desteklenen: degisken, if/elif/else, for, extends, block, include, macro, filtre, yorum
 
-import std/[tables, strutils, os, json]
-import ./hatalar
+import std/[tables, strutils, os, sequtils, algorithm]
+import ./tipler
 
 type
-  SablonMotoru* = ref object
-    dizin*: string                    ## Şablon dizini
-    uzanti*: string                   ## Dosya uzantısı (.html varsayılan)
-    onbellek*: Table[string, string]  ## Şablon önbelleği
-    onbellekAcik*: bool               ## Önbellek açık mı?
+  SablonYukleyici* = ref object
+    dizin*: string
+    onbellek*: Table[string, string]
+    onbellekAktif*: bool
 
-## Yeni şablon motoru oluştur
-proc yeniSablonMotoru*(dizin: string = "views", uzanti: string = ".html"): SablonMotoru =
-  result = SablonMotoru(
+  BlokIcerigi = Table[string, string]
+  MakroTanimi = object
+    parametreler: seq[string]
+    govde: string
+
+proc yeniSablonYukleyici*(dizin: string = "templates",
+                           onbellek: bool = true): SablonYukleyici =
+  result = SablonYukleyici(
     dizin: dizin,
-    uzanti: uzanti,
     onbellek: initTable[string, string](),
-    onbellekAcik: true
+    onbellekAktif: onbellek
   )
 
-## Şablon dosyasını yükle
-proc yukle*(motor: SablonMotoru, isim: string): string =
-  let dosyaYolu = motor.dizin / isim & motor.uzanti
-  
-  if motor.onbellekAcik and isim in motor.onbellek:
-    return motor.onbellek[isim]
-  
-  if not fileExists(dosyaYolu):
-    raise yeniSablonHatasi("Şablon bulunamadı: '" & isim & "' (" & dosyaYolu & ")")
-  
-  result = readFile(dosyaYolu)
-  if motor.onbellekAcik:
-    motor.onbellek[isim] = result
+proc dosyaOku(yukleyici: SablonYukleyici, isim: string): string =
+  if yukleyici.onbellekAktif and isim in yukleyici.onbellek:
+    return yukleyici.onbellek[isim]
+  let yol = yukleyici.dizin / isim
+  if not fileExists(yol):
+    return "<!-- sablon bulunamadi: " & yol & " -->"
+  result = readFile(yol)
+  if yukleyici.onbellekAktif:
+    yukleyici.onbellek[isim] = result
 
-## {{ degisken }} yerleştirmesi
-proc degiskenleriIsle(sablon: string, baglamm: Table[string, JsonNode]): string =
-  result = sablon
-  for isim, deger in baglamm:
-    let yer = "{{" & isim & "}}"
-    let yerBosluklu = "{{ " & isim & " }}"
-    var degerStr: string
-    case deger.kind
-    of JString: degerStr = deger.getStr()
-    of JInt:    degerStr = $deger.getInt()
-    of JFloat:  degerStr = $deger.getFloat()
-    of JBool:   degerStr = if deger.getBool(): "doğru" else: "yanlış"
-    of JNull:   degerStr = ""
-    else:       degerStr = $deger
-    result = result.replace(yer, degerStr).replace(yerBosluklu, degerStr)
+proc filtreUygula(deger: string, filtreler: seq[string]): string =
+  result = deger
+  for filtre in filtreler:
+    case filtre.strip()
+    of "buyuk", "upper":    result = result.toUpperAscii()
+    of "kucuk", "lower":    result = result.toLowerAscii()
+    of "trim":              result = result.strip()
+    of "uzunluk", "length": result = $result.len
+    of "html":
+      result = result.replace("&", "&amp;").replace("<", "&lt;")
+                     .replace(">", "&gt;").replace("\"", "&quot;")
+    of "url":
+      result = result.replace(" ", "%20").replace("&", "%26")
+    of "ters", "reverse":
+      var chars = toSeq(result.items)
+      reverse(chars)
+      result = chars.join("")
+    else: discard
 
-## {# yorum #} bloklarını kaldır
-proc yorumlariKaldir(sablon: string): string =
-  result = sablon
-  var konum = 0
-  while true:
-    let bas = result.find("{#", konum)
-    if bas < 0: break
-    let son = result.find("#}", bas)
-    if son < 0: break
-    result = result[0..<bas] & result[son+2..^1]
-    konum = bas
+proc degiskenAl(baglam: SablonBaglami, anahtar: string): string =
+  if anahtar in baglam:
+    return baglam[anahtar]
+  let parcalar = anahtar.split(".")
+  if parcalar.len > 0 and parcalar[0] in baglam:
+    return baglam[parcalar[0]]
+  result = ""
 
-## {% if kosul %} ... {% endif %} işle
-proc kosullariIsle(sablon: string, baglamm: Table[string, JsonNode]): string =
-  result = sablon
-  var konum = 0
-  
-  while true:
-    let ifBas = result.find("{% if ", konum)
-    if ifBas < 0: break
-    
-    let ifSon = result.find("%}", ifBas)
-    if ifSon < 0: break
-    
-    let kosulAdi = result[ifBas + 6 ..< ifSon].strip()
-    let endifBas = result.find("{% endif %}", ifSon)
-    if endifBas < 0: break
-    
-    # else bloğu var mı?
-    let elseBas = result.find("{% else %}", ifSon, endifBas)
-    
-    # Koşulu değerlendir
-    var kosulDogruMu = false
-    if kosulAdi in baglamm:
-      let deger = baglamm[kosulAdi]
-      kosulDogruMu = case deger.kind
-        of JBool:   deger.getBool()
-        of JString: deger.getStr().len > 0
-        of JInt:    deger.getInt() != 0
-        of JNull:   false
-        else:       true
-    elif kosulAdi.startsWith("not "):
-      let gercekAd = kosulAdi[4..^1].strip()
-      if gercekAd in baglamm:
-        let deger = baglamm[gercekAd]
-        kosulDogruMu = not (case deger.kind
-          of JBool:   deger.getBool()
-          of JString: deger.getStr().len > 0
-          of JNull:   false
-          else:       true)
+proc ifadeDegerlendir(baglam: SablonBaglami, ifade: string): bool =
+  let s = ifade.strip()
+  if s.startsWith("not "):
+    return not ifadeDegerlendir(baglam, s[4..^1])
+  if " and " in s:
+    let p = s.split(" and ", 1)
+    return ifadeDegerlendir(baglam, p[0]) and ifadeDegerlendir(baglam, p[1])
+  if " or " in s:
+    let p = s.split(" or ", 1)
+    return ifadeDegerlendir(baglam, p[0]) or ifadeDegerlendir(baglam, p[1])
+  # Karsilastirma: a == b, a != b, a > b, a < b
+  for op in ["==", "!=", ">=", "<=", ">", "<"]:
+    if op in s:
+      let p = s.split(op, 1)
+      let sol = degiskenAl(baglam, p[0].strip())
+      let sag = p[1].strip().strip(chars={'"', '\''})
+      case op
+      of "==": return sol == sag
+      of "!=": return sol != sag
+      of ">":  return (try: parseInt(sol) > parseInt(sag) except: false)
+      of "<":  return (try: parseInt(sol) < parseInt(sag) except: false)
+      of ">=": return (try: parseInt(sol) >= parseInt(sag) except: false)
+      of "<=": return (try: parseInt(sol) <= parseInt(sag) except: false)
+      else: discard
+  let deger = degiskenAl(baglam, s)
+  result = deger.len > 0 and deger != "false" and deger != "0"
+
+proc isleParcali(sablon: string, baglam: var SablonBaglami,
+                 bloklar: var BlokIcerigi,
+                 makrolar: var Table[string, MakroTanimi],
+                 derinlik: int = 0): string
+
+proc isleParcali(sablon: string, baglam: var SablonBaglami,
+                 bloklar: var BlokIcerigi,
+                 makrolar: var Table[string, MakroTanimi],
+                 derinlik: int = 0): string =
+  if derinlik > 50:
+    return sablon
+  result = ""
+  var i = 0
+  while i < sablon.len:
+    # {{ degisken }} - degisken degistirme
+    if i + 1 < sablon.len and sablon[i] == '{' and sablon[i+1] == '{':
+      let bitis = sablon.find("}}", i + 2)
+      if bitis < 0:
+        result.add(sablon[i])
+        inc i
+        continue
+      let icerik = sablon[i+2 ..< bitis].strip()
+      # Filtre kontrolu: degisken | filtre1 | filtre2
+      let parcalar = icerik.split("|")
+      let degiskenAdi = parcalar[0].strip()
+      let deger = degiskenAl(baglam, degiskenAdi)
+      if parcalar.len > 1:
+        result.add(filtreUygula(deger, parcalar[1..^1]))
       else:
-        kosulDogruMu = true
-    
-    let dogru_icerik = if elseBas > 0:
-                         result[ifSon+2 ..< elseBas]
-                       else:
-                         result[ifSon+2 ..< endifBas]
-    let yanlis_icerik = if elseBas > 0:
-                           result[elseBas+10 ..< endifBas]
-                         else: ""
-    
-    let secilen = if kosulDogruMu: dogru_icerik else: yanlis_icerik
-    result = result[0..<ifBas] & secilen & result[endifBas+11..^1]
-    konum = ifBas
+        result.add(deger)
+      i = bitis + 2
+    # {# yorum #}
+    elif i + 1 < sablon.len and sablon[i] == '{' and sablon[i+1] == '#':
+      let bitis = sablon.find("#}", i + 2)
+      i = if bitis >= 0: bitis + 2 else: sablon.len
+    # {% tag %}
+    elif i + 1 < sablon.len and sablon[i] == '{' and sablon[i+1] == '%':
+      let bitis = sablon.find("%}", i + 2)
+      if bitis < 0:
+        result.add(sablon[i])
+        inc i
+        continue
+      let etiket = sablon[i+2 ..< bitis].strip()
+      i = bitis + 2
+      # {% if ifade %}
+      if etiket.startsWith("if "):
+        let ifade = etiket[3..^1].strip()
+        # if/elif/else/endif bloklarini bul
+        var derinlikSayac = 1
+        var j = i
+        var ifBitisKonum = -1
+        while j < sablon.len:
+          if j + 1 < sablon.len and sablon[j] == '{' and sablon[j+1] == '%':
+            let eb = sablon.find("%}", j + 2)
+            if eb >= 0:
+              let ic = sablon[j+2 ..< eb].strip()
+              if ic.startsWith("if "): inc derinlikSayac
+              elif ic == "endif":
+                dec derinlikSayac
+                if derinlikSayac == 0:
+                  ifBitisKonum = j
+                  break
+            j = if eb >= 0: eb + 2 else: sablon.len
+          else: inc j
+        if ifBitisKonum < 0:
+          continue
+        let ifBlok = sablon[i ..< ifBitisKonum]
+        i = ifBitisKonum + "{% endif %}".len + 2
+        # if/elif/else ayir
+        var secilenBlok = ""
+        if ifadeDegerlendir(baglam, ifade):
+          # else veya elif'ten once olan kisim
+          let elseIdx = ifBlok.find("{% else %}")
+          let elifIdx = ifBlok.find("{% elif ")
+          if elifIdx >= 0 and (elseIdx < 0 or elifIdx < elseIdx):
+            secilenBlok = ifBlok[0 ..< elifIdx]
+          elif elseIdx >= 0:
+            secilenBlok = ifBlok[0 ..< elseIdx]
+          else:
+            secilenBlok = ifBlok
+        else:
+          let elseIdx = ifBlok.find("{% else %}")
+          if elseIdx >= 0:
+            secilenBlok = ifBlok[elseIdx + "{% else %}".len ..< ifBlok.len]
+        if secilenBlok.len > 0:
+          var altBaglam = baglam
+          result.add(isleParcali(secilenBlok, altBaglam, bloklar, makrolar, derinlik+1))
+      # {% for eleman in liste %}
+      elif etiket.startsWith("for ") and " in " in etiket:
+        let forIcerik = etiket[4..^1]
+        let inIdx = forIcerik.find(" in ")
+        let degiskenAdi = forIcerik[0 ..< inIdx].strip()
+        let listeAdi = forIcerik[inIdx+4 ..< forIcerik.len].strip()
+        # endfor bul
+        var derinlikSayac = 1
+        var j = i
+        var forBitisKonum = -1
+        while j < sablon.len:
+          if j + 1 < sablon.len and sablon[j] == '{' and sablon[j+1] == '%':
+            let eb = sablon.find("%}", j + 2)
+            if eb >= 0:
+              let ic = sablon[j+2 ..< eb].strip()
+              if ic.startsWith("for "): inc derinlikSayac
+              elif ic == "endfor":
+                dec derinlikSayac
+                if derinlikSayac == 0:
+                  forBitisKonum = j
+                  break
+            j = if eb >= 0: eb + 2 else: sablon.len
+          else: inc j
+        if forBitisKonum < 0: continue
+        let forGovde = sablon[i ..< forBitisKonum]
+        i = forBitisKonum + "{% endfor %}".len + 2
+        let listeStr = degiskenAl(baglam, listeAdi)
+        let elemanlar = if listeStr.len > 0: listeStr.split(",") else: newSeq[string]()
+        for idx, eleman in elemanlar:
+          var altBaglam = baglam
+          altBaglam[degiskenAdi] = eleman.strip()
+          altBaglam["loop_index"] = $idx
+          altBaglam["loop_count"] = $(idx + 1)
+          altBaglam["loop_first"] = if idx == 0: "true" else: "false"
+          altBaglam["loop_last"] = if idx == elemanlar.len-1: "true" else: "false"
+          result.add(isleParcali(forGovde, altBaglam, bloklar, makrolar, derinlik+1))
+      # {% include "dosya.html" %}
+      elif etiket.startsWith("include "):
+        let dosyaAdi = etiket[8..^1].strip().strip(chars={'"', '\''})
+        discard dosyaAdi  # yukleyici olmadan atlat
+      # {% block isim %}
+      elif etiket.startsWith("block "):
+        let blokAdi = etiket[6..^1].strip()
+        let endBlok = "{% endblock %}"
+        let blokBitis = sablon.find(endBlok, i)
+        if blokBitis >= 0:
+          let blokIcerik = sablon[i ..< blokBitis]
+          i = blokBitis + endBlok.len
+          if blokAdi in bloklar:
+            var altBaglam = baglam
+            result.add(isleParcali(bloklar[blokAdi], altBaglam, bloklar, makrolar, derinlik+1))
+          else:
+            var altBaglam = baglam
+            result.add(isleParcali(blokIcerik, altBaglam, bloklar, makrolar, derinlik+1))
+      # {% raw %} ... {% endraw %}
+      elif etiket == "raw":
+        let rawBitis = sablon.find("{% endraw %}", i)
+        if rawBitis >= 0:
+          result.add(sablon[i ..< rawBitis])
+          i = rawBitis + "{% endraw %}".len
+      # {% set anahtar = deger %}
+      elif etiket.startsWith("set ") and "=" in etiket:
+        let setIcerik = etiket[4..^1]
+        let eqIdx = setIcerik.find("=")
+        let anahtar = setIcerik[0 ..< eqIdx].strip()
+        let deger = setIcerik[eqIdx+1 ..< setIcerik.len].strip().strip(chars={'"', '\''})
+        baglam[anahtar] = deger
+      # bilinmeyen etiket - atla
+    else:
+      result.add(sablon[i])
+      inc i
 
-## {% for ogre in liste %} ... {% endfor %} işle
-proc dongusuIsle(sablon: string, baglamm: Table[string, JsonNode]): string =
-  result = sablon
-  var konum = 0
-  
-  while true:
-    let forBas = result.find("{% for ", konum)
-    if forBas < 0: break
-    
-    let forSon = result.find("%}", forBas)
-    if forSon < 0: break
-    
-    let forSatir = result[forBas + 7 ..< forSon].strip()
-    let inKonum = forSatir.find(" in ")
-    if inKonum < 0:
-      konum = forBas + 1
-      continue
-    
-    let ogeAdi = forSatir[0..<inKonum].strip()
-    let listeAdi = forSatir[inKonum+4..^1].strip()
-    
-    let endforBas = result.find("{% endfor %}", forSon)
-    if endforBas < 0: break
-    
-    let sablonIcerik = result[forSon+2 ..< endforBas]
-    
-    var dongIcerik = ""
-    if listeAdi in baglamm and baglamm[listeAdi].kind == JArray:
-      for i, oge in baglamm[listeAdi].elems:
-        var ogeBaglam = baglamm
-        ogeBaglam[ogeAdi] = oge
-        ogeBaglam["dongu_indeks"] = %i
-        ogeBaglam["dongu_sayac"] = %(i + 1)
-        ogeBaglam["dongu_ilkMi"] = %(i == 0)
-        ogeBaglam["dongu_sonMu"] = %(i == baglamm[listeAdi].elems.len - 1)
-        dongIcerik &= degiskenleriIsle(sablonIcerik, ogeBaglam)
-    
-    result = result[0..<forBas] & dongIcerik & result[endforBas+12..^1]
-    konum = forBas
+proc isle*(sablon: string, baglam: SablonBaglami = initTable[string, string]()): string =
+  ## Sablonu isle ve sonucu dondur
+  var degBaglam = baglam
+  var bloklar = initTable[string, string]()
+  var makrolar = initTable[string, MakroTanimi]()
+  result = isleParcali(sablon, degBaglam, bloklar, makrolar)
 
-## {% extends "ana_sablon" %} kalıtım desteği
-proc kalitimIsle*(motor: SablonMotoru, sablon: string,
-                  baglamm: Table[string, JsonNode]): string =
-  # extends tag'i ara
-  let extendsBas = sablon.find("{% extends \"")
-  if extendsBas < 0:
-    return sablon
-  
-  let extendsSon = sablon.find("\" %}", extendsBas)
-  if extendsSon < 0:
-    return sablon
-  
-  let anaSablonAdi = sablon[extendsBas + 12 ..< extendsSon]
-  let anaSablon = motor.yukle(anaSablonAdi)
-  
-  # Blokları çıkar
-  var cocukBloklar = initTable[string, string]()
-  var s = 0
-  while true:
-    let blockBas = sablon.find("{% block ", s)
-    if blockBas < 0: break
-    let blockIsimSon = sablon.find(" %}", blockBas + 9)
-    if blockIsimSon < 0: break
-    let blockIsim = sablon[blockBas + 9 ..< blockIsimSon]
-    let endblockBas = sablon.find("{% endblock %}", blockIsimSon + 3)
-    if endblockBas < 0: break
-    cocukBloklar[blockIsim] = sablon[blockIsimSon + 3 ..< endblockBas]
-    s = endblockBas + 14
-  
-  # Ana şablondaki blokları çocuk bloklarıyla değiştir
-  result = anaSablon
-  for isim, icerik in cocukBloklar:
-    let blokDeseni = "{% block " & isim & " %}"
-    let blokSonDeseni = "{% endblock %}"
-    let basBas = result.find(blokDeseni)
-    if basBas >= 0:
-        let sonBas = result.find(blokSonDeseni, basBas)
-        if sonBas >= 0:
-          result = result[0..<basBas] & icerik & result[sonBas + blokSonDeseni.len..^1]
+proc isle*(yukleyici: SablonYukleyici, dosyaAdi: string,
+           baglam: SablonBaglami = initTable[string, string]()): string =
+  ## Sablon dosyasini yukle ve isle
+  let sablon = yukleyici.dosyaOku(dosyaAdi)
+  result = isle(sablon, baglam)
 
-## {% include "parca" %} partial desteği
-proc parcalariIsle*(motor: SablonMotoru, sablon: string): string =
-  result = sablon
-  var konum = 0
-  while true:
-    let includeBas = result.find("{% include \"", konum)
-    if includeBas < 0: break
-    let includeSon = result.find("\" %}", includeBas)
-    if includeSon < 0: break
-    let parcaAdi = result[includeBas + 12 ..< includeSon]
-    try:
-      let parcaIcerik = motor.yukle(parcaAdi)
-      result = result[0..<includeBas] & parcaIcerik & result[includeSon+4..^1]
-    except:
-      result = result[0..<includeBas] & result[includeSon+4..^1]
-    konum = includeBas
+proc yeniBaglam*(): SablonBaglami =
+  ## Bos sablon baglami olustur
+  result = initTable[string, string]()
 
-## Şablonu render et
-proc render*(motor: SablonMotoru, isim: string,
-             baglamm: Table[string, JsonNode] = initTable[string, JsonNode]()): string =
-  var sablon = motor.yukle(isim)
-  
-  # Kalıtımı işle
-  sablon = motor.kalitimIsle(sablon, baglamm)
-  
-  # Partial'ları işle
-  sablon = motor.parcalariIsle(sablon)
-  
-  # Yorumları kaldır
-  sablon = yorumlariKaldir(sablon)
-  
-  # Koşulları işle
-  sablon = kosullariIsle(sablon, baglamm)
-  
-  # Döngüleri işle
-  sablon = dongusuIsle(sablon, baglamm)
-  
-  # Değişkenleri yerleştir
-  sablon = degiskenleriIsle(sablon, baglamm)
-  
-  result = sablon
+proc baglamEkle*(baglam: var SablonBaglami, anahtar: string, deger: string) =
+  baglam[anahtar] = deger
 
-## Doğrudan string şablonu render et (dosyasız)
-proc renderMetin*(sablon: string,
-                  baglamm: Table[string, JsonNode] = initTable[string, JsonNode]()): string =
-  var s = yorumlariKaldir(sablon)
-  s = kosullariIsle(s, baglamm)
-  s = dongusuIsle(s, baglamm)
-  s = degiskenleriIsle(s, baglamm)
-  result = s
+proc baglamEkle*(baglam: var SablonBaglami, anahtar: string, deger: int) =
+  baglam[anahtar] = $deger
+
+proc baglamEkle*(baglam: var SablonBaglami, anahtar: string, deger: bool) =
+  baglam[anahtar] = if deger: "true" else: "false"
+
+proc baglamEkleSeq*(baglam: var SablonBaglami, anahtar: string, deger: seq[string]) =
+  baglam[anahtar] = deger.join(",")
+
+proc render*(yukleyici: SablonYukleyici, dosyaAdi: string,
+             baglam: SablonBaglami = initTable[string, string]()): string =
+  result = yukleyici.isle(dosyaAdi, baglam)
+
+proc sablonIsle*(sablon: string, baglam: SablonBaglami): string =
+  ## Uyumluluk: isle() ile ayni
+  result = isle(sablon, baglam)

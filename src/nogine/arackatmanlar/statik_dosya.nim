@@ -46,12 +46,14 @@ proc dizinListesiHtml(yol: string, urlYol: string): string =
   result &= "</ul><hr><small>Nogine - Created by noginse</small></body></html>"
 
 proc nogineStatik*(ayarlar: StatikAyarlari): ArackatmanProc =
-  result = proc(istek: Istek, yanit: Yanit, sonraki: SonrakiProc): Future[void] {.async, gcsafe.} =
+  result = proc(istek: Istek, yanit: Yanit, sonraki: SonrakiProc): Future[void] {.async.} =
     if istek.metod != hmGET and istek.metod != hmHEAD:
+      {.gcsafe.}:
       await sonraki()
       return
 
     if not istek.yol.startsWith(ayarlar.url_prefix):
+      {.gcsafe.}:
       await sonraki()
       return
 
@@ -86,6 +88,7 @@ proc nogineStatik*(ayarlar: StatikAyarlari): ArackatmanProc =
       return
 
     if not fileExists(dosyaYolu):
+      {.gcsafe.}:
       await sonraki()
       return
 

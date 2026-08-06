@@ -95,7 +95,7 @@ type
     prefix*: string            ## Grup prefix'i
 
   ## Template bağlamı
-  SablonBaglami* = Table[string, JsonNode]
+  SablonBaglami* = Table[string, string]
 
   ## Sıkıştırma algoritması
   SikistirmaAlgoritma* = enum

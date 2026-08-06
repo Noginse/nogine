@@ -58,9 +58,10 @@ proc zamanBicimlendir(ms: float): string =
 
 ## Loglama arackatmanı
 proc nogineLoglama*(ayarlar: LogAyarlari): ArackatmanProc =
-  result = proc(istek: Istek, yanit: Yanit, sonraki: SonrakiProc): Future[void] {.async, gcsafe.} =
+  result = proc(istek: Istek, yanit: Yanit, sonraki: SonrakiProc): Future[void] {.async.} =
     let baslangic = epochTime()
-    await sonraki()
+    {.gcsafe.}:
+      await sonraki()
     let sure = (epochTime() - baslangic) * 1000.0
     let zamanStr = if ayarlar.zaman: "[" & format(now(), "HH:mm:ss") & "] " else: ""
     let metodStr = ($istek.metod).alignLeft(7)

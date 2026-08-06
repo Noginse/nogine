@@ -39,7 +39,7 @@ proc kaynakIzinli(kaynak: string, izinVerilenler: seq[string]): bool =
   result = false
 
 proc nogineKors*(ayarlar: KorsAyarlari): ArackatmanProc =
-  result = proc(istek: Istek, yanit: Yanit, sonraki: SonrakiProc): Future[void] {.async, gcsafe.} =
+  result = proc(istek: Istek, yanit: Yanit, sonraki: SonrakiProc): Future[void] {.async.} =
     let kaynak = istek.basliklar.getOrDefault("origin", "")
     if kaynak.len > 0:
       if kaynakIzinli(kaynak, ayarlar.izinVerilenKaynaklar):
@@ -63,7 +63,8 @@ proc nogineKors*(ayarlar: KorsAyarlari): ArackatmanProc =
       await yanit.gonder()
       return
 
-    await sonraki()
+    {.gcsafe.}:
+      await sonraki()
 
 proc nogineKors*(): ArackatmanProc =
   result = nogineKors(varsayilanKorsAyarlari())

@@ -109,3 +109,8 @@ proc rotaGoster*(rota: RotaTanimi): string =
     result &= " [wildcard]"
   if rota.arackatmanlar.len > 0:
     result &= " [" & $rota.arackatmanlar.len & " arackatman]"
+## Route kaydet - Nogine üzerine metot (admin panel için gerekli)
+proc rotaEkle*(uygulama: Nogine, metod: HttpMetod, yol: string,
+               isleyici: IsleyiciProc,
+               arackatmanlar: seq[ArackatmanProc] = @[]) =
+  uygulama.rotalar.add(yeniRota(metod, yol, isleyici, arackatmanlar))
